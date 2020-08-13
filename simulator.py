@@ -80,6 +80,8 @@ def simulate(trainingPlan, network, profiles):
             samplesAssigned += assignment['localBatch']
             computeTasksByLayer[lid][aid] = sim.scheduleCompute(aid, lid, computeTime, prevXferTasks)
         assert(samplesAssigned == totalBatchSize)
+    # Run forward-pass
+    sim.run()
     
 net = buildHostAndGpuNetwork(2, 2, 10, 10)
 net.printAllPaths()
@@ -87,5 +89,8 @@ trainingPlan = json.loads(buildSimplePlan())
 print(json.dumps(trainingPlan, indent=2, sort_keys=False))
 prof_v100 = Profile()
 # TODO!!! Insert fake datapoints for testing ..
+prof_v100.addDatapoint(1, 32, 100)
+prof_v100.addDatapoint(1, 64, 164)
+prof_v100.addDatapoint(2, 32, 132)
 profiles = {"V100": prof_v100}
 simulate(trainingPlan, net, profiles)
