@@ -1,6 +1,25 @@
+# Copyright (c) 2020 MIT
+# 
+# Permission to use, copy, modify, and distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+#
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR(S) DISCLAIM ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL AUTHORS BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
 import json
 import jsonpickle
 import heapq
+import networkx as nx
+import matplotlib.pyplot as plt
+from matplotlib.collections import PathCollection
+# from grave import plot_network
+# from grave.style import use_attributes
 
 MAX_ELEMENTS = 100
 
@@ -22,6 +41,10 @@ class Accelerator(Element):
         self.model = model              # GPU model name.
         net.accelerators.append(self)
 
+    def __str__(self):
+        return str(self.guid) + "A"
+
+
 # Goal: model memory bw and CPU effects?
 class Host(Element):
     sharedMaxPcieBw = 1000      # in Gbps
@@ -31,12 +54,18 @@ class Host(Element):
         net.hosts.append(self)
         self.sharedMaxPcieBw = sharedMaxPcieBw
     
+    def __str__(self):
+        return str(self.guid) + "H"
+    
 class Switch(Element):
     def __init__(self, net, bw = -1, lat = 0):
         Element.__init__(self, net)
         self.bw = bw        # in Gbps
         self.lat = lat      # in microseconds
         net.switches.append(self)
+    
+    def __str__(self):
+        return str(self.guid) + "S"
 
 class Link(json.JSONEncoder):
     # lid = -1
@@ -106,6 +135,31 @@ class Network:
             for dst in self.pathFromSrc[src]:
                 print("             %3d (%s) :  %s" %
                      (dst, type(self.elements[dst]).__name__, str(self.pathFromSrc[src][dst])))
+                     
+    def plotNetwork(self, showPlot=True):
+        g = nx.DiGraph()
+        g.add_nodes_from(self.elements)
+        for link in self.links:
+            g.add_edge(self.elements[link.src], self.elements[link.dst], object=link)
+        # nx.draw(g)
+        nodeColors = []
+        nodeShapes = []
+        for n in g:
+            if isinstance(n, Accelerator):
+                nodeColors.append('gray')
+                nodeShapes.append('s')
+            elif isinstance(n, Host):
+                nodeColors.append('orange')
+                nodeShapes.append('o')
+            elif isinstance(n, Switch):
+                nodeColors.append('red')
+                nodeShapes.append('o')
+            else:
+                nodeColors.append('yellow')
+        if showPlot:
+            nx.draw(g, with_labels=True, node_color=nodeColors, node_shape='s', font_weight='bold')
+            plt.show()
+        return g
 
 
 ##########################################################################
@@ -158,8 +212,66 @@ class Simulation:
         self.linkTasks = [] # Probably not needed in Python ...
         self.compTasks = [] # Probably not needed in Python ...
         self.initialTasks = []
+        self.log_tasksByGuid = [list() for x in range(len(network.elements))]
         # self.linkReadyTime = [0] * len(network.links)
         # self.accelReadyTime = [0] * len(network.elements)
+    
+    def plotOnClick(self, event):
+        print("Node on plot was clicked.")
+        if isinstance(event.artist, PathCollection):
+            all_nodes = event.artist
+            ind = event.ind[0] # event.ind is a single element array.
+            print("Accelerator %d ran following tasks: " % self.display_accelerators[ind].guid)
+            guid = self.display_accelerators[ind].guid
+            print("#     Task  readyTime  startTime  finalTime       nextTasks")
+            for t in self.log_tasksByGuid[guid]:
+                # print(jsonpickle.encode(task, unpicklable=False))
+                if isinstance(t, ComputeTask):
+                    print("%10s %10.1f %10.1f %10.1f     %s"
+                        % ("layer" + str(t.layerId), t.readyTime, t.startTime, t.finishTime, str(t.nextTasks)))
+                elif isinstance(t, NetworkTask):
+                    link = self.net.links[t.linkId]
+                    print("%10s %10.1f %10.1f %10.1f     %s"
+                        % ("%d->%d"%(link.src, link.dst), t.readyTime, t.startTime, t.finishTime, str(t.nextTasks)))
+    
+    def plotNetwork(self):
+        g = self.net.plotNetwork(showPlot=False)
+        pos = nx.layout.spring_layout(g)
+        
+        nodeColors = []
+        nodeShapes = []
+        accelerators = []
+        hosts = []
+        switches = []
+        for n in g:
+            if isinstance(n, Accelerator):
+                accelerators.append(n)
+            elif isinstance(n, Host):
+                hosts.append(n)
+            elif isinstance(n, Switch):
+                switches.append(n)
+            else:
+                assert(False)
+        
+        fig, ax = plt.subplots()
+        node_size = 300
+        anodes = nx.draw_networkx_nodes(g, pos, nodelist=accelerators, node_shape='s', node_color='white', edgecolors='black')
+        anodes.set_picker(5)
+        hnodes = nx.draw_networkx_nodes(g, pos, nodelist=hosts, node_shape='o', node_color='orange', edgecolors='black')
+        snodes = nx.draw_networkx_nodes(g, pos, nodelist=switches, node_shape='o', node_color=(1,153./255,153./153), edgecolors='black')
+
+        nx.draw_networkx_edges(g, pos, node_size=node_size, arrowstyle='->',
+                                        arrowsize=15, edge_color='black', width=1)
+        nx.draw_networkx_labels(g, pos, font_color='black', font_family='arial',
+                                        font_size=10)
+        
+        # nx.draw_networkx_nodes(g, with_labels=True, node_color=nodeColors, node_shape='s', font_weight='bold')
+        # art.set_picker(10)
+        self.display_accelerators = accelerators
+        fig.canvas.mpl_connect('pick_event', self.plotOnClick)
+        
+        plt.show()
+        return g
 
     # Returns the final link transfer task.
     def scheduleXfer(self, src, dst, xferBytes, prevComputeTask = None):
@@ -206,6 +318,9 @@ class Simulation:
             
             
             if isinstance(task, ComputeTask):
+                # For logging purpose, register the current task to the used element.
+                self.log_tasksByGuid[task.acceleratorGuid].append(task)
+                
                 task.startTime = max(readyTime, accelReadyTime[task.acceleratorGuid])
                 task.finishTime = task.startTime + task.computeTime
                 accelReadyTime[task.acceleratorGuid] = task.finishTime
@@ -221,6 +336,11 @@ class Simulation:
             elif isinstance(task, NetworkTask):
                 link = self.net.links[task.linkId]
                 assert(link.lid == task.linkId)
+                
+                # For logging purpose, register the current task to the used element.
+                self.log_tasksByGuid[link.src].append(task)
+                self.log_tasksByGuid[link.dst].append(task)
+                
                 task.startTime = max(readyTime, linkReadyTime[task.linkId])
                 assert(task.xferBytes > 0)
                 task.finishTime = task.startTime + link.calcXferTime(task.xferBytes)
@@ -248,11 +368,11 @@ class Simulation:
         # print("Dumping internal states...")
         print("# readyTime  startTime  finalTime   taskType                                         nextTasks")
         for t in self.compTasks + self.linkTasks:
-            print("%10d %10s %10s    %s    %s"
-                % (t.readyTime, str(t.startTime), str(t.finishTime), str(t), str(t.nextTasks)))
-        
-            
-        
+            print("%10.1f %10.1f %10.1f    %s    %s"
+                % (t.readyTime, t.startTime, t.finishTime, str(t), str(t.nextTasks)))
+
+
+
 ##########################################################################
 # Helper functions
 ##########################################################################
@@ -298,6 +418,7 @@ def buildHostAndGpuNetwork(hostCount, gpusPerHost, hostToTorBw, hostToTorLat):
 def __testSimulationBasic():
     net = buildSimpleNetwork()
     net.calcShortestPath()
+    # net.plotNetwork()
     # net.printAllPaths()
     
     sim = Simulation(net)
@@ -313,7 +434,7 @@ def __testSimulationBasic():
     # print(jsonpickle.encode(tasks[-1], unpicklable=False) + str(tasks[-1].nextTasks))
     sim.run()
 
-
 # net = buildHostAndGpuNetwork(2, 2, 10, 10)
 # sanityCheck(net)
+# net.plotNetwork()
 __testSimulationBasic()
