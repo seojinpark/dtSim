@@ -1,3 +1,5 @@
+#!/usr/bin/python3
+
 # Copyright (c) 2020 MIT
 # 
 # Permission to use, copy, modify, and distribute this software for any
@@ -12,49 +14,17 @@
 # ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
 # OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 
+import sys
 import jsonpickle
 import json
 from networkEditor import Network
 from networkEditor import Simulation
 from networkEditor import buildHostAndGpuNetwork
 from trainingPlanEditor import buildSimplePlan
-
-
-class Profile:
-    def __init__(self):
-        self.datapoint = [{}, {}] # [<dict> layerId] = [(localBatch, computeTime), ...]
-        
-    def addDatapoint(self, layerId, localBatch, computeTimes, alreadySorted = False):
-        if layerId not in self.datapoint[0]:
-            for i in range(len(self.datapoint)):
-                self.datapoint[i][layerId] = []
-        assert(len(self.datapoint) == len(computeTimes))
-        for i in range(len(self.datapoint)):
-            self.datapoint[i][layerId].append((localBatch, computeTimes[i]))
-            if not alreadySorted:
-                self.datapoint[i][layerId].sort() # TODO: make it efficient when performance matters.
-        
-    def getCost(self, phase, layerId, localBatch):
-        batch_a = 0
-        compTime_a = 0
-        batch_b = 0
-        compTime_b = 0
-        
-        for dpLocalBatch, dpComputeTime in self.datapoint[phase][layerId]:
-            if localBatch <= dpLocalBatch:
-                batch_b = dpLocalBatch
-                compTime_b = dpComputeTime
-                break
-            else:
-                batch_a = dpLocalBatch
-                compTime_a = dpComputeTime
-        
-        assert(batch_b > 0)
-        
-        return (localBatch - batch_a + 0.0) * (compTime_b - compTime_a + 0.0) / (batch_b - batch_a + 0.0) + compTime_a
+from profile import Profile
 
 DEBUG = True
-def simulate(trainingPlan, network, profiles):
+def simulate(trainingPlan, network, profiles, useGuidForAcceleratorIds=False):
     sim = Simulation(network)
     layersById = [None] * (len(trainingPlan) + 1)
     for layer in trainingPlan:
@@ -69,7 +39,12 @@ def simulate(trainingPlan, network, profiles):
         
         for assignment in layer["assignedAccelerators"]:
             #    def scheduleCompute(self, acceleratorId, layerId, computeTime, prevXferTasks = []):
-            aid = assignment['id']
+            # aid = assignment['id']
+            if useGuidForAcceleratorIds:
+                aid = assignment['id']
+            else:
+                aid = network.accelerators[assignment['id']-1].guid
+
             lid = layer["layerId"]
             computeTime = profiles[network.elements[aid].model].getCost(0, lid, assignment['localBatch'])
             prevXferTasks = []
@@ -81,8 +56,13 @@ def simulate(trainingPlan, network, profiles):
                     totalPrevBatchSize = sum([pla["localBatch"] for pla in pl["assignedAccelerators"]])
                     assert(totalBatchSize == totalPrevBatchSize)
                 for pla in pl["assignedAccelerators"]:
-                    if (plsa <= samplesAssigned + assignment['localBatch']) and \
-                            (plsa + pla["localBatch"] >= samplesAssigned): # sample ranges overlap.
+                    if useGuidForAcceleratorIds:
+                        plaid = pla['id']
+                    else:
+                        plaid = network.accelerators[pla['id']-1].guid
+
+                    if (plsa < samplesAssigned + assignment['localBatch']) and \
+                            (plsa + pla["localBatch"] > samplesAssigned): # sample ranges overlap.
                         # Generate xfer task.
                         left = max(plsa, samplesAssigned)
                         right = min(plsa + pla["localBatch"], samplesAssigned + assignment['localBatch'])
@@ -90,9 +70,9 @@ def simulate(trainingPlan, network, profiles):
                         assert(xferSamples > 0)
                         xferBytes = xferSamples * prevLayerPtr["InputBytesPerSample"]
                         # def scheduleXfer(self, src, dst, xferBytes, prevComputeTask = None):
-                        print("Scheduled xfer for %d samples from %d to %d" % (xferSamples, pla['id'], aid))
-                        prevXferTasks.append(sim.scheduleXfer(pla['id'], aid, xferBytes,
-                                             computeTasksByLayer[prevLayerPtr["LayerId"]][pla['id']]))
+                        print("Scheduled xfer for %d samples from %d to %d" % (xferSamples, plaid, aid))
+                        prevXferTasks.append(sim.scheduleXfer(plaid, aid, xferBytes,
+                                             computeTasksByLayer[prevLayerPtr["LayerId"]][plaid]))
                     if plsa >= samplesAssigned + assignment['localBatch']:
                         break
                     plsa += pla["localBatch"]
@@ -104,19 +84,34 @@ def simulate(trainingPlan, network, profiles):
     sim.run()
     sim.plotNetwork()
 
-def main():
+def run_example1():
     net = buildHostAndGpuNetwork(2, 2, 10, 10)
     net.printAllPaths()
     # net.plotNetwork()
-    trainingPlan = json.loads(buildSimplePlan())
+    # trainingPlan = json.loads(buildSimplePlan())
+    trainingPlan = json.load(open("simplePlan.json"))
     print(json.dumps(trainingPlan, indent=2, sort_keys=False))
-    prof_v100 = Profile()
-    # TODO!!! Insert fake datapoints for testing ..
-    prof_v100.addDatapoint(1, 32, [100, 100])
-    prof_v100.addDatapoint(1, 64, [164, 150])
-    prof_v100.addDatapoint(2, 32, [132, 110])
+    prof_v100 = Profile("profile_pipedream/P100/profile.json")
+    # prof_v100 = Profile()
+    # prof_v100.addDatapoint(1, 32, [100, 100])
+    # prof_v100.addDatapoint(1, 64, [164, 150])
+    # prof_v100.addDatapoint(2, 32, [132, 110])
     profiles = {"V100": prof_v100}
     simulate(trainingPlan, net, profiles)
+    
+def main():
+    if len(sys.argv) == 1:
+        run_example1()
+    elif len(sys.argv) == 3:
+        net = buildHostAndGpuNetwork(2, 2, 10, 10)
+        profile = Profile(sys.argv[1])
+        profiles = {"V100": profile} # TODO: support heterogeneous GPUs
+        with open(sys.argv[2]) as f:
+            trainingPlan = json.load(f)
+        simulate(trainingPlan, net, profiles, False)
+    else:
+        print("Wrong number of args! Usage:")
+        print("./simulator <path_to_profile> <path_to_plan>")
 
 if __name__ == "__main__":
     main()

@@ -15,33 +15,37 @@
 import jsonpickle
 import json
 
-layers = [None]
 
 class Layer:
-
-    def __init__(self, layerId, modelBytes, assignedAccelerators, prevLayers):
+    
+    # layers = [None] # for tracking all layers.
+    
+    def __init__(self, layerId, name, modelBytes, prevLayers, assignedAccelerators = None):
         self.layerId = layerId
-        # Layer.nextLayerId += 1
-        # self.computeTime = computeTime
+        self.name = name
         self.modelBytes = modelBytes
-        self.assignedAccelerators = assignedAccelerators
         self.prevLayers = prevLayers                    # [(LayerId, inputByteSize), ...]
-        self.nextLayers = []                            # [(LayerId, outputByteSize), ...]
+        self.assignedAccelerators = assignedAccelerators
+        # self.nextLayers = []                            # [(LayerId, outputByteSize), ...]
         
-        for prev in prevLayers:
-            prevId = prev["LayerId"]
-            inputBytes = prev["InputBytesPerSample"]
-            layers[prevId].nextLayers.append({"LayerId": self.layerId, "OutputBytesPerSample": inputBytes})
-        layers.append(self)
+        # for prev in prevLayers:
+        #     prevId = prev["LayerId"]
+        #     inputBytes = prev["InputBytesPerSample"]
+        #     Layer.layers[prevId].nextLayers.append({"LayerId": self.layerId, "OutputBytesPerSample": inputBytes})
+        #
+        # Layer.layers.append(self)
+        
+    def assignAccelerators(self, assignedAccelerators):
+        self.assignedAccelerators = assignedAccelerators
 
 ########################################################
 ### Helper function                                  ###
 ########################################################
 def buildSimplePlan():
     plan = []
-    plan.append(Layer(1, 1000, [{"id": 2, "localBatch": 64}], []))
-    plan.append(Layer(2, 10000, [{"id": 3, "localBatch": 32}, {"id": 5, "localBatch": 32}],
-                     [{"LayerId": 1, "InputBytesPerSample": 100}]))
+    plan.append(Layer(1, "fist", 1000, [],[{"id": 2, "localBatch": 64}]))
+    plan.append(Layer(2, "second", 10000, [{"LayerId": 1, "InputBytesPerSample": 100}],
+                     [{"id": 3, "localBatch": 32}, {"id": 5, "localBatch": 32}]))
     return jsonpickle.encode(plan, unpicklable=False)
 
 # print(json.dumps(json.loads(buildSimplePlan()), indent=2, sort_keys=False))

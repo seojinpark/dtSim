@@ -1,3 +1,5 @@
+#!/usr/bin/python3
+
 # Copyright (c) 2020 MIT
 # 
 # Permission to use, copy, modify, and distribute this software for any
@@ -39,6 +41,7 @@ class Accelerator(Element):
     def __init__(self, net, model = "V100"):
         Element.__init__(self, net)
         self.model = model              # GPU model name.
+        self.rank = len(net.accelerators)
         net.accelerators.append(self)
 
     def __str__(self):
@@ -275,6 +278,9 @@ class Simulation:
 
     # Returns the final link transfer task.
     def scheduleXfer(self, src, dst, xferBytes, prevComputeTask = None):
+        if src == dst:
+            return prevComputeTask
+
         path = self.net.pathFromSrc[src][dst]
         prevNode = src
         prevTask = prevComputeTask
@@ -423,6 +429,7 @@ def __testSimulationBasic():
     
     sim = Simulation(net)
     tasks = []
+    sim.scheduleXfer(1, 1, 100, prevComputeTask = None)
     tasks.append(sim.scheduleCompute(1, 1, 100, []))
     # print("Scheduled: %s" % str(tasks[-1]))
     # print(jsonpickle.encode(tasks[-1], unpicklable=False) + str(tasks[-1].nextTasks))
@@ -434,7 +441,11 @@ def __testSimulationBasic():
     # print(jsonpickle.encode(tasks[-1], unpicklable=False) + str(tasks[-1].nextTasks))
     sim.run()
 
-# net = buildHostAndGpuNetwork(2, 2, 10, 10)
-# sanityCheck(net)
-# net.plotNetwork()
-__testSimulationBasic()
+def main():
+    # net = buildHostAndGpuNetwork(2, 2, 10, 10)
+    # sanityCheck(net)
+    # net.plotNetwork()
+    __testSimulationBasic()
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,44 @@
+[
+  {
+    "layerId": 1,
+    "modelBytes": 1000,
+    "assignedAccelerators": [
+      {
+        "id": 1,
+        "localBatch": 32
+      },
+      {
+        "id": 2,
+        "localBatch": 32
+      }
+    ],
+    "prevLayers": [],
+    "nextLayers": [
+      {
+        "LayerId": 2,
+        "OutputBytesPerSample": 100
+      }
+    ]
+  },
+  {
+    "layerId": 2,
+    "modelBytes": 10000,
+    "assignedAccelerators": [
+      {
+        "id": 3,
+        "localBatch": 32
+      },
+      {
+        "id": 4,
+        "localBatch": 32
+      }
+    ],
+    "prevLayers": [
+      {
+        "LayerId": 1,
+        "InputBytesPerSample": 100
+      }
+    ],
+    "nextLayers": []
+  }
+]
