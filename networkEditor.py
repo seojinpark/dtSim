@@ -26,8 +26,10 @@ from matplotlib.collections import PathCollection
 MAX_ELEMENTS = 100
 
 # Default configurations
+DEFAULT_BW_NVLINK = 1600   # in Gbps
 DEFAULT_BW_PCIE_TO_GPU = 1000   # in Gbps
-DEFAULT_LAT_PCIE_TO_GPU = 10    # in microseconds
+DEFAULT_LAT_NVLINK = 10   # in microseconds
+DEFAULT_LAT_PCIE_TO_GPU = 17    # in microseconds
 DEFAULT_LAT_NIC_TO_HOST = 100   # in microseconds
 
 class Element:
@@ -383,12 +385,23 @@ class Simulation:
 # Helper functions
 ##########################################################################
 def addAccelerators(net, switchOrHost, numberOfGpus,
+                    nvlinkBwAmongGpus = None,
                     bwPcieToGpu = DEFAULT_BW_PCIE_TO_GPU,
                     latPcieToGpu = DEFAULT_LAT_PCIE_TO_GPU):
+    gpus = []
     for i in range(numberOfGpus):
         gpu = Accelerator(net)
+        gpus.append(gpu)
         pcieLink1 = Link(net, switchOrHost, gpu, bwPcieToGpu, latPcieToGpu)
         pcieLink2 = Link(net, gpu, switchOrHost, bwPcieToGpu, latPcieToGpu)
+    
+    if nvlinkBwAmongGpus != None:
+        for gpu1 in gpus:
+            for gpu2 in gpus:
+                if gpu1 == gpu2:
+                    continue
+                Link(net, gpu1, gpu2, nvlinkBwAmongGpus, DEFAULT_LAT_NVLINK)
+        
 
 def sanityCheck(net):
     print(net.printConfigInJSON())
@@ -415,6 +428,18 @@ def buildHostAndGpuNetwork(hostCount, gpusPerHost, hostToTorBw, hostToTorLat):
         nicLink1 = Link(net, rootSw, host, hostToTorBw, hostToTorLat)
         nicLink2 = Link(net, host, rootSw, hostToTorBw, hostToTorLat)
         addAccelerators(net, host, gpusPerHost)
+    net.calcShortestPath()
+    return net
+
+def buildAwsP3Network(hostCount, gpusPerHost, hostToTorBw, hostToTorLat):
+    # Network with a single switch and GPUs. No host.
+    net = Network()
+    rootSw = Switch(net)
+    for i in range(hostCount):
+        host = Host(net)
+        nicLink1 = Link(net, rootSw, host, hostToTorBw, hostToTorLat)
+        nicLink2 = Link(net, host, rootSw, hostToTorBw, hostToTorLat)
+        addAccelerators(net, host, gpusPerHost, 1600)
     net.calcShortestPath()
     return net
 
@@ -445,6 +470,11 @@ def main():
     # net = buildHostAndGpuNetwork(2, 2, 10, 10)
     # sanityCheck(net)
     # net.plotNetwork()
+
+    # net = buildAwsP3Network(2, 4, 10, 10)
+    # sanityCheck(net)
+    # net.plotNetwork()
+
     __testSimulationBasic()
 
 if __name__ == "__main__":

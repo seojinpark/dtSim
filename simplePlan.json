@@ -12,13 +12,7 @@
         "localBatch": 32
       }
     ],
-    "prevLayers": [],
-    "nextLayers": [
-      {
-        "LayerId": 2,
-        "OutputBytesPerSample": 100
-      }
-    ]
+    "prevLayers": []
   },
   {
     "layerId": 2,
@@ -38,7 +32,22 @@
         "LayerId": 1,
         "InputBytesPerSample": 100
       }
+    ]
+  },
+  {
+    "layerId": 3,
+    "modelBytes": 10,
+    "assignedAccelerators": [
+      {
+        "id": 4,
+        "localBatch": 64
+      }
     ],
-    "nextLayers": []
+    "prevLayers": [
+      {
+        "LayerId": 2,
+        "InputBytesPerSample": 10
+      }
+    ]
   }
 ]

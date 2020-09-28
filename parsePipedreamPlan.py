@@ -59,9 +59,9 @@ def main():
                 backwardComp = float(matchTimes.group(2))
                 activationSize = float(matchTimes.group(3))
                 parameterSize = float(matchTimes.group(4))
-            
+
                 stageId = int(re.match('stage_id=(\d+)', components[3]).group(1))
-                
+
                 if int(plan[layerId-1]["layerId"]) != layerId:
                     print("Not matched! %d %d" % (int(plan[layerId-1]["layerId"]), layerId))
                 assert(int(plan[layerId-1]["layerId"]) == int(layerId))
